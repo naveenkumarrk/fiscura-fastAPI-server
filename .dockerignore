@@ -1,0 +1,19 @@
+# Ignore Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Ignore virtual environments except .venv
+env/
+venv/
+!.venv  # This ensures .venv is copied
+
+# Ignore environment files (security reasons)
+*.env
+*.env.*
+
+# Ignore Docker-related files
+Dockerfile
+docker-compose.yml
+.dockerignore
