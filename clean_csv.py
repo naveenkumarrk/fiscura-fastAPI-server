@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 
+
 load_dotenv()
 
 BASE_DIR = Path(__file__).parent

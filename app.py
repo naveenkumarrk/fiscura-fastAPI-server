@@ -3,9 +3,11 @@ from datetime import datetime
 from dotenv import load_dotenv
 import os
 import csv
+import requests
 from groq import Groq
 from together import Together
-from fastapi import FastAPI, HTTPException, Query, UploadFile, File
+from fastapi import FastAPI, HTTPException, Query, UploadFile, File, Form
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 import numpy as np
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +15,7 @@ from pathlib import Path
 import joblib 
 from pydantic import BaseModel
 
-from clean_csv import extract_tables, cleanCsv, process_chunk, process_data_for_analysis
+from clean_csv import extract_tables, cleanCsv, process_chunk
 
 
 
@@ -285,9 +287,12 @@ def get_upi_analysis():
 
 
 
+
 model = joblib.load('loan_status_predictor.pkl')
-num_cols = ['ApplicantIncome', 'CoapplicantIncome', 'LoanAmount', 'Loan_Amount_Term']
 scaler = joblib.load('vector.pkl')
+num_cols = ['ApplicantIncome', 'CoapplicantIncome', 'LoanAmount', 'Loan_Amount_Term']
+
+
 
 
 class LoanApproval(BaseModel):
@@ -333,3 +338,167 @@ def process_data_for_analysis(csv_path: Path) -> None:
     df["Date"] = pd.to_datetime(df["Date"], format='mixed', dayfirst=True)
     df["Date_Formated"] = df["Date"].dt.strftime("%d-%b-%Y")
     df.to_csv(WORKING_CSV, index=False)
+
+
+model = joblib.load('credit_card_model.pkl')  # Load your model
+
+class Transaction(BaseModel):
+    Time: float
+    V1: float
+    V2: float
+    V3: float
+    V4: float
+    V5: float
+    V6: float
+    V7: float
+    V8: float
+    V9: float
+    V10: float
+    V11: float
+    V12: float
+    V13: float
+    V14: float
+    V15: float
+    V16: float
+    V17: float
+    V18: float
+    V19: float
+    V20: float
+    V21: float
+    V22: float
+    V23: float
+    V24: float
+    V25: float
+    V26: float
+    V27: float
+    V28: float
+    Amount: float
+
+@app.post("/predict-fraud")
+def predict_fraud(transaction: Transaction):
+    # Dynamically exclude 'Time'
+    features = [getattr(transaction, f) for f in transaction.__fields__ if f != 'Time']
+    data = np.array([features])
+    
+    prediction = model.predict(data)
+    return {"fraud": bool(prediction[0])}
+
+
+TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY","894f20aae5d74def34790efed3a6d2f3883fc6a7b5716bfcdea47a8c6207ba19")
+TOGETHER_API_URL = "https://api.together.xyz/v1/completions"
+
+def generate_together_response(prompt, temperature=0.7, max_tokens=500):
+    """Generate a response using the Together API"""
+    headers = {
+        "Authorization": f"Bearer {TOGETHER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "model": "mistralai/Mixtral-8x7B-Instruct-v0.1", # You can change this to your preferred model
+        "prompt": prompt,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "top_p": 0.9,
+        "top_k": 40
+    }
+    
+    try:
+        response = requests.post(TOGETHER_API_URL, headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json()["choices"][0]["text"].strip()
+    except Exception as e:
+        print(f"Error calling Together API: {str(e)}")
+        return f"I'm sorry, I encountered an error processing your request. Please try again later."
+    
+
+@app.post("/ask-financial-advisor")
+async def ask_financial_advisor(question: str = Form(...), financial_status: Optional[str] = Form(None)):
+    """
+    Process user questions using the Together API to provide dynamic, personalized financial advice
+    
+    Parameters:
+    - question: User's question about financial planning
+    - financial_status: Optional financial status detected from previous analysis
+    """
+    try:
+        # Format prompt based on whether a financial status was provided
+        status_context = ""
+        financial_categories = {
+            "retirement": ("RET", "Retirement Planning"),
+            "investment": ("INV", "Investment Strategy"),
+            "debt": ("DBT", "Debt Management"),
+            "budgeting": ("BDG", "Personal Budgeting"),
+            "tax": ("TAX", "Tax Planning"),
+            "insurance": ("INS", "Insurance Planning")
+        }
+        
+        if financial_status and financial_status in financial_categories:
+            status_name = financial_categories.get(financial_status, ("UNK", "Unknown"))[1]
+            status_context = f"The user has previously indicated interest in {status_name} ({financial_status})."
+        
+        # Create the prompt for the Together API
+        prompt = f"""You are an expert financial advisor specializing in personal finance and investment strategies. 
+Provide a helpful, concise response to the user's question. Keep your answer short (3-5 sentences maximum), 
+factually accurate, and focused on evidence-based financial principles. If appropriate, organize key points in a bullet list format.
+
+{status_context}
+
+User question: {question}
+
+Remember:
+- Always recommend consulting a licensed financial professional for personalized advice
+- Be clear, concise, and educational
+- Provide actionable advice where appropriate
+- Focus on generally accepted financial principles and cite sources when possible
+
+Your response:"""
+
+        # Call the Together API
+        response_text = generate_together_response(prompt, temperature=0.7, max_tokens=500)
+        
+        # Extract key points (if any) from the response
+        lines = response_text.split('\n')
+        main_response = lines[0] if lines else response_text
+        additional_info = []
+        
+        for line in lines[1:]:
+            # Look for bullet points or numbered lists
+            clean_line = line.strip()
+            if clean_line and (clean_line.startswith('-') or clean_line.startswith('•') or 
+                              (len(clean_line) > 1 and clean_line[0].isdigit() and clean_line[1] == '.')):
+                additional_info.append(clean_line.lstrip('- •0123456789. '))
+        
+        # If no bullet points were found but we have multiple paragraphs, use those
+        if not additional_info and len(lines) > 1:
+            main_response = lines[0]
+            additional_info = [line.strip() for line in lines[1:] if line.strip()]
+        
+        # Add references when available
+        references = []
+        reference_keywords = ["according to", "based on", "as reported by", "source:", "reference:"]
+        for info in additional_info:
+            for keyword in reference_keywords:
+                if keyword in info.lower():
+                    references.append(info)
+                    break
+                    
+        if not references:
+            references = ["Financial information based on generally accepted principles in personal finance.",
+                         "For personalized advice, please consult with a certified financial planner."]
+        
+        return {
+            "response": main_response,
+            "additional_info": additional_info[:3],  # Limit to 3 additional points
+            "references": references[:2]  # Include up to 2 references
+        }
+    
+    except Exception as e:
+        return {
+            "response": "I'm sorry, I encountered an error while processing your financial question.",
+            "additional_info": [
+                "This may be due to a temporary issue with our service.",
+                "Please try again later or rephrase your question."
+            ],
+            "error": str(e)
+        }
